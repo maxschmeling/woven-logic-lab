@@ -1,4 +1,4 @@
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -52,10 +52,10 @@ try {
   assert.equal(await page.locator('#circuit-view').getAttribute('aria-pressed'),'true');
   // Bad imports must not replace the compiled project.
   await page.locator('#open-file').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{"version":1,"source":"evil"}')});
-  assert.match(await page.locator('#toast').innerText(),/Could not open/);
+  await expect(page.locator('#toast')).toContainText('Could not open');
   assert.match(await page.locator('#dimensions').innerText(),/8 ROWS × 4 OUTPUTS/);
   await page.locator('#open-file').setInputFiles({name:'good.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({version:1,source:PRESETS.adder.code,view:'yarn'}))});
-  assert.match(await page.locator('#dimensions').innerText(),/4 ROWS × 2 OUTPUTS/);
+  await expect(page.locator('#dimensions')).toHaveText('4 ROWS × 2 OUTPUTS');
   // Print event builds the complete packet. PDF validates print layout separately from screen.
   await page.evaluate(()=>window.dispatchEvent(new Event('beforeprint')));
   assert.match(await page.locator('.print-only').last().innerText(),/Assembly checklist/);
