@@ -1,0 +1,15 @@
+{
+  "name": "woven-logic-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python3 -m http.server 8080 --directory site",
+    "test:browser": "node tests/browser.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.55.0"
+  }
+}
