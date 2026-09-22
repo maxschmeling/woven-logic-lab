@@ -1,8 +1,9 @@
 import * as T from 'three';
+import { moduleLayout } from '../site/rom.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-// A deliberately idealized ring-per-bit teaching model, not Apollo construction CAD.
+// Simplified shared-core rope module, not Apollo construction CAD.
 // All geometry is procedural; the current truth-table bank determines every wire route.
 export function createLoom(host, onProgress, onFailure) {
   const renderer = new T.WebGLRenderer({ antialias: true, alpha: false });
@@ -34,7 +35,7 @@ export function createLoom(host, onProgress, onFailure) {
   key.shadow.normalBias = .035; scene.add(key);
   const rim = new T.DirectionalLight('#a8d6d3', 1.8); rim.position.set(20,10,-20); scene.add(rim);
   const group = new T.Group(); scene.add(group);
-  let wires = [], cores, corePositions = [], needle, rowCount = 0, extent = 12;
+  let wires = [], cores, corePositions = [], needle, rowCount = 0, extent = 12, selection, currentAddress;
   let progress = 1, playing = false, inView = true, needsRender = true, lastTime = 0, lost = false;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const copper = new T.MeshStandardMaterial({color:'#cc8853',metalness:.82,roughness:.28});
@@ -70,8 +71,11 @@ export function createLoom(host, onProgress, onFailure) {
   }
   function setModel(model, start=0, count=16) {
     clear(); const rows=model.rows.slice(start,start+count); rowCount=rows.length;
-    const cols=model.outputs.length, dx=2.25,dz=2.2;
-    const w=Math.max(8,(cols-1)*dx+5),d=Math.max(8,(rowCount-1)*dz+5);
+    const cols=model.outputs.length, layout=moduleLayout(rows,cols);
+    const w=layout.width,d=layout.depth;
+    rowCount=cols; // The timeline weaves sense wires, not word cores.
+    host.dataset.words=JSON.stringify(rows.map(r=>r.values));
+    host.dataset.routes=JSON.stringify(layout.wires.map(w=>w.crossings));
     extent=Math.max(w,d);group.position.y=0;
     box(w+.5,.38,d+.5,frame,0,-.43,0);box(w,.24,d,boardMat,0,-.15,0);
     for(const z of [-d/2,d/2]) box(w+.65,.52,.35,brass,0,-.12,z);
@@ -81,46 +85,55 @@ export function createLoom(host, onProgress, onFailure) {
       box(.2,.015,.035,rubber,x,.102,z);
       mesh(new T.CylinderGeometry(.32,.36,.4,16),rubber,x,-.78,z);
     }
-    // Each ring stands on edge, hole along X; wire can physically pass through its center.
-    cores=new T.InstancedMesh(new T.TorusGeometry(.56,.16,10,28),ceramic,rows.length*cols);
+    // One selected word core shares several sense wires (a simplified rope strand).
+    // No decorative copper wraps: every colored path is an actual stored bit.
+    cores=new T.InstancedMesh(new T.TorusGeometry(.68,.14,12,36),ceramic,rows.length);
     cores.castShadow=true;cores.receiveShadow=true;group.add(cores);
-    const transform=new T.Object3D();let index=0;
-    rows.forEach((row,r)=>{
-      const z=(r-(rowCount-1)/2)*dz;
-      const points=[[-w/2+.5,.73,z],[-w/2+1,.76,z]];
-      for(let c=0;c<cols;c++) {
-        const x=(c-(cols-1)/2)*dx;
-        transform.position.set(x,.76,z);transform.rotation.set(0,Math.PI/2,0);transform.updateMatrix();cores.setMatrixAt(index++,transform.matrix);corePositions.push({x,z});
-        // Fine copper wraps hug the toroid rather than occupying the central hole.
-        const wind=[];
-        for(let j=0;j<=96;j++) {const t=j/96*Math.PI*2,phi=t*3; const rad=.56+.18*Math.cos(phi);wind.push([x+.18*Math.sin(phi),.76+rad*Math.cos(t),z+rad*Math.sin(t)]);}
-        tube(wind,.022,copper,96);
-        if(row.values[c]) points.push([x-.82,.76,z],[x,.76,z],[x+.82,.76,z]);
-        else points.push([x-.85,.76,z],[x-.43,1.67,z],[x,1.78,z],[x+.43,1.67,z],[x+.85,.76,z]);
-      }
-      points.push([w/2-.9,.76,z],[w/2-.5,.73,z]);
-      const wire=tube(points,.065,wireMats[r%wireMats.length],Math.max(80,cols*32));
-      wires.push({...wire,row:row.address});
-      for(const x of [-w/2+.5,w/2-.5]) {mesh(new T.CylinderGeometry(.13,.13,.85,12),brass,x,.35,z);mesh(new T.TorusGeometry(.18,.045,6,16),cotton,x,.72,z).rotation.x=Math.PI/2;}
+    const transform=new T.Object3D();
+    layout.cores.forEach((core,i)=>{
+      transform.position.set(core.x,1.15,core.z);transform.rotation.set(0,Math.PI/2,0);transform.updateMatrix();cores.setMatrixAt(i,transform.matrix);
+      corePositions.push(core);
+      box(.34,.42,1.5,cotton,core.x,.25,core.z);
+      label(String(core.address).padStart(4,'0'),1.25,core.x,core.z+1.3);
     });
-    // Small laced cross-supports and a metal identity plate give it a built-object silhouette.
-    label(`WOVEN / ${String(start).padStart(4,'0')} — ${String(start+rowCount-1).padStart(4,'0')} / ${cols} BIT`,Math.min(w-2,13),0,d/2-1);
+    for(const route of layout.wires) {
+      const wire=tube(route.points,.038,wireMats[route.bit%wireMats.length],Math.max(120,rows.length*48));
+      wire.crossings=route.crossings;wires.push(wire);
+      const p=route.points[0];mesh(new T.CylinderGeometry(.09,.09,.65,10),brass,p[0]-.35,.4,p[2]);
+    }
+    // Connector block and laced frame complete the compact module silhouette.
+    box(w-2,.6,.65,rubber,0,.2,-d/2+.7);
+    for(let i=0;i<16;i++)box(.08,.3,.8,brass,(i-7.5)*(w-3)/16,.4,-d/2+.6);
+    label(`ROPE / ${start}–${start+rows.length-1} / ${cols} BIT`,Math.min(w-2,13),0,d/2-.5);
+    selection=mesh(new T.TorusGeometry(.91,.04,8,40),new T.MeshBasicMaterial({color:'#ffee92'}));
+    selection.rotation.y=Math.PI/2;selection.userData.ownMaterial=true;
+    select(currentAddress ?? start);
     needle=mesh(new T.CylinderGeometry(.038,.016,1.05,8),brass);needle.rotation.z=Math.PI/2;
     const floor=mesh(new T.PlaneGeometry(extent*8,extent*8),new T.ShadowMaterial({opacity:.3}),0,-1.01,0);floor.rotation.x=-Math.PI/2;floor.userData.ownMaterial=true;
     home();setProgress(progress);needsRender=true;
   }
+  function select(address) {
+    currentAddress=address;
+    const core=corePositions.find(c=>c.address===address);
+    if(selection){selection.visible=Boolean(core);if(core)selection.position.set(core.x,1.15,core.z);}
+    host.dataset.selectedAddress=String(address);needsRender=true;
+  }
+  function focusBit(bit=-1) {
+    wires.forEach((w,i)=>{w.mesh.material=wireMats[i%wireMats.length];w.mesh.visible=bit<0||bit===i;w.focused=bit<0||bit===i;});
+    setProgress(progress);
+  }
   function home(view='angle') {
-    const size=extent*1.2; controls.target.set(0,.2,0);
+    const size=extent*1.4; controls.target.set(0,.2,0);
     if(view==='top') camera.position.set(0,size*1.55,.001);
-    else if(view==='detail') camera.position.set(-extent*.38,extent*.55,extent*.52);
+    else if(view==='detail') {const c=corePositions.find(c=>c.address===currentAddress)||corePositions[0];controls.target.set(c.x,1.15,c.z);camera.position.set(c.x-5,3,c.z+2);}
     else camera.position.set(-size*.8,size*.95,size*.95);
-    controls.minDistance=extent*.55;controls.maxDistance=extent*4;
+    controls.minDistance=view==='detail'?2:extent*.55;controls.maxDistance=extent*4;
     controls.update();needsRender=true;
   }
   function setProgress(value) {
     progress=T.MathUtils.clamp(value,0,1);
     const position=progress*rowCount;
-    wires.forEach((wire,i)=>{const amount=T.MathUtils.clamp(position-i,0,1); const n=Math.floor(wire.mesh.geometry.index.count*amount/6)*6;wire.mesh.geometry.setDrawRange(0,n);wire.mesh.visible=n>0;});
+    wires.forEach((wire,i)=>{const amount=T.MathUtils.clamp(position-i,0,1); const n=Math.floor(wire.mesh.geometry.index.count*amount/6)*6;wire.mesh.geometry.setDrawRange(0,n);wire.mesh.visible=n>0 && wire.focused!==false;});
     if(needle) {
       const active=Math.min(rowCount-1,Math.floor(position));const fraction=position-active;
       needle.visible=progress>0 && progress<1;
@@ -144,5 +157,5 @@ export function createLoom(host, onProgress, onFailure) {
     if(needsRender){renderer.render(scene,camera);needsRender=false;host.dataset.ready='true';}
   });
   resize();
-  return {setModel,setProgress,play,home,zoom(factor){camera.position.sub(controls.target).multiplyScalar(factor).clampLength(controls.minDistance,controls.maxDistance).add(controls.target);controls.update();needsRender=true;},dispose(){renderer.setAnimationLoop(null);ro.disconnect();observer.disconnect();controls.dispose();clear();mats.concat(wireMats).forEach(m=>m.dispose());texture.dispose();env.dispose();renderer.dispose();canvas.remove();}};
+  return {setModel,setProgress,play,home,select,focusBit,zoom(factor){camera.position.sub(controls.target).multiplyScalar(factor).clampLength(controls.minDistance,controls.maxDistance).add(controls.target);controls.update();needsRender=true;},dispose(){renderer.setAnimationLoop(null);ro.disconnect();observer.disconnect();controls.dispose();clear();mats.concat(wireMats).forEach(m=>m.dispose());texture.dispose();env.dispose();renderer.dispose();canvas.remove();}};
 }

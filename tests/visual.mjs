@@ -28,6 +28,33 @@ try {
   await expect(page.locator('#weave-play')).toHaveAttribute('aria-pressed','false');
   await page.locator('#weave-time').fill('1000');
   await page.screenshot({path:'test-results/loom-desktop.png'});
+  // Valid edits update geometry without the compile button; inputs move the read halo.
+  await page.locator('#source').fill('INPUT a,b\nx = a XOR b\ny = a AND b');
+  await expect(page.locator('#compile-status')).toContainText('4 rows, 2 outputs');
+  await page.waitForFunction(()=>document.querySelector('#stale').hidden);
+  assert.deepEqual(JSON.parse(await page.locator('#memory-view').getAttribute('data-words')),[[0,0],[1,0],[1,0],[0,1]]);
+  await page.locator('#switches button').first().click();
+  await expect(page.locator('#memory-view')).toHaveAttribute('data-selected-address','2');
+  await expect(page.locator('#memory-readout')).toContainText('Through: x');
+  await page.selectOption('#memory-mode','program');
+  await expect(page.locator('#program-result')).toContainText('matches lookup ROM');
+  await page.selectOption('#wire-focus','0');
+  await page.locator('#view-detail').click();
+  await page.locator('#instruction-next').click();
+  await expect(page.locator('#memory-view')).toHaveAttribute('data-selected-address','1');
+  const [romFile]=await Promise.all([page.waitForEvent('download'),page.locator('#rom-download').click()]);
+  assert.match(readFileSync(await romFile.path(),'utf8'),/HALT/);
+  await page.locator('#source').fill('INPUT a\nx =');
+  await expect(page.locator('#visual-stale')).toBeVisible();
+  await expect(page.locator('#compile-status')).toHaveClass('error');
+  await page.selectOption('#preset','alu');
+  await page.selectOption('#wire-focus','-1');
+  await page.locator('#view-angle').click();
+  await page.locator('#weave-time').fill('1000');
+  await page.locator('.memory-stage').screenshot({path:'test-results/module-program.png'});
+  const programA11y=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();
+  assert.deepEqual(programA11y.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)})),[]);
+  await page.selectOption('#memory-mode','table');
   // Every built-in design compiles; sections and camera controls remain usable.
   for(const preset of ['adder4','alu','compare4','display','mux8']) {
     await page.selectOption('#preset',preset);

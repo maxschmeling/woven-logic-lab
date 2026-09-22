@@ -1,3 +1,4 @@
+import { programROM, executeROM } from './rom.js';
 import { compile, PRESETS, addressOf, csv, firmware, LIMITS, starterCompatible } from './logic.js';
 import { patternSVG, escapeHTML as e } from './pattern.js';
 import { materialHTML, guideHTML, troubleshootingHTML, checklistHTML } from './build.js';
@@ -7,6 +8,7 @@ const STORAGE = 'woven-logic-lab-v1';
 let model, bits = [], view = 'yarn', build = 'yarn', toastTimeout;
 const BANK_SIZE = 16;
 let bank = 0, loom = null, loomModel = null, loomBank = -1;
+let rom, memoryMode='table', instruction=0, compileTimer;
 const bankStart = () => bank * BANK_SIZE;
 const sectionModel = () => ({ ...model, rows: model.rows.slice(bankStart(), bankStart() + BANK_SIZE) });
 function toast(message) { $('toast').textContent = message; $('toast').classList.add('visible'); clearTimeout(toastTimeout); toastTimeout = setTimeout(() => $('toast').classList.remove('visible'), 4500); }
@@ -24,12 +26,13 @@ function selectPreset(id) {
   $('source').value = PRESETS[id].code; $('preset-detail').textContent = PRESETS[id].detail;
   runCompile();
 }
-function syncDirty() { $('stale').hidden = !model || $('source').value === model.source; }
+function syncDirty() { $('stale').hidden = !model || $('source').value === model.source; $('visual-stale').hidden=$('stale').hidden; }
 function runCompile() {
+  clearTimeout(compileTimer);
   try {
     const next = compile($('source').value);
     bits = next.inputs.map((name, i) => model?.inputs[i] === name ? bits[i] || 0 : 0);
-    model = next; bank = Math.floor(addressOf(bits) / BANK_SIZE);
+    model = next; rom=programROM(model);instruction=0;loomModel=null; bank = Math.floor(addressOf(bits) / BANK_SIZE);
     $('compile-status').className = '';
     $('compile-status').textContent = `✓ Woven. ${model.rows.length} rows, ${model.outputs.length} outputs, ${model.ones} stored 1s.`;
     renderSwitches();
@@ -101,7 +104,7 @@ function preparePrint() {
 window.addEventListener('beforeprint', preparePrint);
 window.addEventListener('afterprint', () => { document.querySelectorAll('.print-only').forEach(n => n.remove()); render(); });
 $('print').addEventListener('click', () => window.print());
-$('source').addEventListener('input', () => { $('preset').value = 'custom'; $('preset-detail').textContent = 'Your own little logic machine.'; syncDirty(); saveLocal(); });
+$('source').addEventListener('input', () => { $('preset').value = 'custom'; $('preset-detail').textContent = 'Your own little logic machine.'; syncDirty(); saveLocal(); compileTimer=setTimeout(runCompile,350); });
 $('source').addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); runCompile(); } });
 $('compile').addEventListener('click', runCompile);
 $('preset').innerHTML = Object.entries(PRESETS).map(([id, p]) => `<option value="${id}">${p.name}</option>`).join('') + '<option value="custom">Custom program</option>';
@@ -130,12 +133,35 @@ $('open-file').addEventListener('change', async event => {
 });
 
 function updateSculpture() {
-  if (loomModel === model && loomBank === bank) return;
-  const first = bankStart(), last = Math.min(model.rows.length - 1, first + BANK_SIZE - 1);
-  $('specimen-label').textContent = `ROWS ${first}–${last} / ${model.outputs.length} OUTPUTS`;
-  $('fallback-pattern').innerHTML = patternSVG(model, -1, 'yarn', first, BANK_SIZE);
-  if (loom) { loom.setModel(model, first, BANK_SIZE); loomModel = model; loomBank = bank; }
+  const program=memoryMode==='program', image=program?rom:model;
+  const selected=program?instruction:addressOf(bits);
+  const first=program?Math.floor(instruction/BANK_SIZE)*BANK_SIZE:bankStart();
+  const last=Math.min(image.rows.length-1,first+BANK_SIZE-1),row=image.rows[selected];
+  const changed=loomModel!==image||loomBank!==first;
+  $('specimen-label').textContent=program?`INSTRUCTIONS ${first}–${last} / 16 BITS`:`ROWS ${first}–${last} / ${model.outputs.length} OUTPUTS`;
+  $('fallback-pattern').innerHTML=patternSVG(image,selected,'yarn',first,BANK_SIZE);
+  if(changed){
+    $('wire-focus').innerHTML='<option value="-1">All data wires</option>'+image.outputs.map((o,i)=>`<option value="${i}">${e(o.name)}</option>`).join('');
+    if(loom){loom.setModel(image,first,BANK_SIZE);loomModel=image;loomBank=first;loom.focusBit(-1);}
+  }
+  loom?.select(selected);
+  const ones=image.outputs.filter((_,i)=>row.values[i]).map(o=>o.name).join(', ')||'none';
+  $('memory-readout').textContent=`${program?'Instruction':'Input address'} ${selected}: ${row.values.join('')} · Through: ${ones}. Other wires bypass.`;
+  $('bit-inspector').innerHTML=image.outputs.map((o,i)=>`<span>${e(o.name)}: ${row.values[i]?'1 · THROUGH':'0 · AROUND'}</span>`).join('');
+  $('program-controls').hidden=!program;
+  if(program){
+    const result=executeROM(rom.words,bits);
+    $('program-result').textContent=`${rom.words.length} stored words · ${rom.listing[instruction]} · CPU output for inputs ${bits.join('')}: ${result.outputs.join('')} · ${result.outputs.join('')===model.rows[addressOf(bits)].values.join('')?'matches lookup ROM':'MISMATCH'}`;
+    $('rom-listing').textContent=rom.words.slice(first,last+1).map((word,i)=>`${first+i===instruction?'→':' '} ${String(first+i).padStart(4,'0')}  ${word.toString(16).padStart(4,'0').toUpperCase()}  ${rom.listing[first+i]}`).join('\n');
+    $('instruction-prev').disabled=instruction===0;$('instruction-next').disabled=instruction===rom.words.length-1;
+  }
 }
+$('memory-mode').addEventListener('change',event=>{memoryMode=event.target.value;loomModel=null;updateSculpture();});
+$('wire-focus').addEventListener('change',event=>loom?.focusBit(Number(event.target.value)));
+$('instruction-prev').addEventListener('click',()=>{instruction=Math.max(0,instruction-1);updateSculpture();});
+$('instruction-next').addEventListener('click',()=>{instruction=Math.min(rom.words.length-1,instruction+1);updateSculpture();});
+$('rom-download').addEventListener('click',()=>download('woven-program-rom.txt','# Woven Logic Lab teaching ISA — NOT AGC code\n# 16 bits: opcode[15:12], operand[11:0]. LOAD=1 CONST=2 NOT=3 AND=4 OR=5 XOR=6 STORE=7 OUT=8 HALT=F (hex).\n'+rom.words.map((w,i)=>`${i} ${w.toString(16).padStart(4,'0')} ${rom.listing[i]}`).join('\n'),'text/plain'));
+
 function chooseBank(value) {
   bank = Math.max(0, Math.min(Math.ceil(model.rows.length / BANK_SIZE) - 1, value));
   bits = [...model.rows[bankStart()].bits]; render();
@@ -165,13 +191,13 @@ async function startSculpture() {
       $('weave-percent').textContent = `${Math.round(progress * 100)}%`;
       $('weave-play').textContent = playing ? 'Ⅱ Pause' : progress >= 1 ? '↶ Replay' : '▶ Weave';
       $('weave-play').setAttribute('aria-pressed', String(playing));
-      const rows = sectionModel().rows.length;
-      $('weave-state').textContent = progress >= 1 ? `Section complete · ${rows} threads woven. Scrub back to see it take shape.` : `Weaving row ${bankStart() + Math.min(rows-1, Math.floor(progress * rows))} · ${Math.floor(progress * rows)} of ${rows} threads complete.`;
+      const rows = memoryMode==='program'?16:model.outputs.length;
+      $('weave-state').textContent = progress >= 1 ? `Section complete · ${rows} bit wires woven. Scrub back to see it take shape.` : `Weaving bit wire ${Math.min(rows-1, Math.floor(progress * rows)) + 1} · ${Math.floor(progress * rows)} of ${rows} threads complete.`;
     }, graphicsFailure);
     updateSculpture();
     $('memory-fallback').hidden = true;
     document.querySelectorAll('.stage-controls button, .stage-controls input, .stage-views button').forEach(el => { el.disabled = false; });
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) { loom.setProgress(.05); loom.play(true); }
+    loom.setProgress(1);
   } catch { graphicsFailure('3D is unavailable in this browser. Your live 2D pattern is shown instead; the workbench, simulation and downloads still work.'); }
 }
 $('weave-play').addEventListener('click', () => loom?.play());

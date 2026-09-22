@@ -85,3 +85,11 @@ The GitHub Actions workflow runs tests, uploads only `site/`, and deploys it to 
 Original diagrams and prose. MIT license for this software and its original artwork; linked external material retains its own rights.
 
 3D implementation references: [Three.js WebGLRenderer](https://threejs.org/docs/pages/WebGLRenderer.html), [OrbitControls](https://threejs.org/docs/pages/OrbitControls.html). Three.js is MIT licensed; its license is shipped with the built site.
+
+## Compact rope module and instruction ROM
+
+Valid editor changes compile after a 350 ms pause; invalid edits preserve the last good memory with an explicit warning. The 3D view opens fully woven, highlights the current address, and supports individual sense-wire isolation. Words occupy a serpentine grid of up to 16 shared cores. `site/rom.js` is the shared geometry/data source. Each wire genuinely crosses the aperture for a one and clears the toroid for a zero; geometry tests sample the rendered spline at the core planes.
+
+The visual can store either lookup results or executable 16-bit teaching instructions. `programROM` lowers the Boolean AST to a stack-machine instruction image; `executeROM` executes those words independently of the original equations. The UI compares its outputs to the lookup result for the current switches. Word navigation is an inspector, not an instruction-step debugger. ROM download includes addresses, hexadecimal words and mnemonics. Opcodes: LOAD=1, CONST=2, NOT=3, AND=4, OR=5, XOR=6, STORE=7, OUT=8, HALT=F; low 12 bits are the signal index, constant or output index. Signals are numbered by input order followed by definition order. There are no loops or branches.
+
+This is not the AGC ISA, has no Apollo parity format, and models one word per core instead of the real Block II twelve. No inhibit/drive/sense electronics or magnetic simulation is supplied. The Arduino and printable yarn/diode instructions still implement the lookup model, not the instruction CPU. The module's compact layout is separate from the flat beginner build pattern.
