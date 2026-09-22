@@ -1,11 +1,12 @@
-import { ROW_PINS, SENSE_PINS, SWITCH_PINS } from './logic.js';
+import { ROW_PINS, SENSE_PINS, SWITCH_PINS, starterCompatible } from './logic.js';
 import { escapeHTML as e, circuitDetail } from './pattern.js';
 export function materials(model, mode) {
   const cells = model.rows.length * model.outputs.length;
+  if (mode === 'circuit' && !starterCompatible(model)) return [[model.ones, 'Stored 1s (diodes in a future custom reader design)'], [model.rows.length, 'Individually addressable rows'], [model.outputs.length, 'Sense columns'], ['Custom', 'Address decoder, sense circuitry and reader—not covered by the starter guide']];
   return mode === 'yarn' ? [
-    ['1', 'A4/letter-size cardboard sheet or stiff craft board'],
+    [Math.ceil(model.rows.length / 16), `Stiff craft boards, about ${Math.max(20, Math.ceil((model.outputs.length + 2) * 2.5))} × ${Math.max(15, Math.ceil((Math.min(model.rows.length, 16) + 2) * 2.5))} cm (up to 16 rows each)`],
     [cells, 'Plastic or wooden rings, 8–12 mm openings (not beads with tiny holes)'],
-    [model.rows.length, 'Yarn lengths, about 40–60 cm each; two contrasting colors help'],
+    [model.rows.length, `Yarn lengths, about ${Math.max(60, model.outputs.length * 10 + 20)} cm each including detours and ties; contrasting colors help`],
     ['1', 'Blunt yarn needle; scissors and tape or nonconductive glue'],
     ['1', 'Printed pattern and a pen for row labels']
   ] : [
@@ -29,8 +30,9 @@ function pinTable(m) {
   return `<div class="table-scroll"><table class="pin-map"><caption>Exact pin map for this pattern</caption><thead><tr><th>Connection</th><th>UNO R3 pin</th></tr></thead><tbody>${lines.map(([a, b]) => `<tr><td>${e(a)}</td><td>${e(b)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 export function guideHTML(m, mode) {
+  if (mode === 'circuit' && !starterCompatible(m)) return `<h3>This design has outgrown the starter reader</h3><p>Your ${m.inputs.length}-input, ${m.outputs.length}-output memory needs <b>${m.rows.length} rows and ${m.outputs.length} sense columns</b>. The direct-wired UNO circuit supports only <b>3 inputs / 4 outputs</b>.</p><p>You can simulate the complete program, inspect or print each 16-row section, export all rows as CSV, or make a larger human-readable yarn model. For an electronic build, start with “Add two bits” or “Add with carry”.</p><p>Building this larger ROM electronically requires a separately engineered address decoder and sense circuit, including loading and leakage checks. The section drawings describe the stored bits, not a complete expanded wiring plan. No UNO pin map or firmware is supplied for this size.</p>`;
   if (mode === 'yarn') return `<h3>Your first woven logic board</h3><p>This is a <b>human-operated lookup machine</b>, not an electronic computer. Yarn stores the answers; you select the input row and read the crossings. Plan 30–60 minutes for a small design; larger patterns take longer.</p><ol>
-<li><b>Print, label, lay out.</b>Print the build packet. On cardboard, mark ${m.rows.length} horizontal rows and ${m.outputs.length} columns spaced about 25 mm apart. Label the rows with their input bits and the columns ${m.outputs.map(o => e(o.name)).join(', ')}. All input labels run left-to-right in the declared order: <code>${m.inputs.join(', ')}</code>. The leftmost input is the most significant bit.</li>
+<li><b>Print, label, lay out.</b>Print the build packet. Across your board sections, mark ${m.rows.length} horizontal rows in total (up to 16 per section) and ${m.outputs.length} columns spaced about 25 mm apart. Label the rows with their input bits and the columns ${m.outputs.map(o => e(o.name)).join(', ')}. All input labels run left-to-right in the declared order: <code>${m.inputs.join(', ')}</code>. The leftmost input is the most significant bit.</li>
 <li><b>Fix the rings in place.</b>Attach one ring at each intersection: ${m.rows.length * m.outputs.length} total. Tape or tie only the edge so the hole remains accessible. You can instead punch two small holes on either side of each printed circle and stitch a through-route beneath its center.</li>
 <li><b>Weave one row at a time.</b>Use a separate yarn length for each row. A <b>1</b> goes through the ring’s opening; a <b>0</b> goes around its outside. The diagram’s curved detour means “around,” not a second bit. Tie off the ends. Do not join neighboring rows.</li>
 <li><b>Read the program.</b>Set the input switches in the app. Find that exact bit pattern on your board, then follow only that row from left to right. Through = 1; around = 0. Each column gives a separate output. For the half-adder, the binary number is <code>carry,sum</code>, even though the columns display sum first.</li>

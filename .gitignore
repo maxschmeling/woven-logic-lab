@@ -1,3 +1,6 @@
 node_modules/
 test-results/
 .DS_Store
+
+site/loom3d.bundle.js
+site/THREE-LICENSE.txt

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compile, PRESETS, evaluate, addressOf, csv, firmware, ROW_PINS, SENSE_PINS, SWITCH_PINS } from '../site/logic.js';
+import { compile, PRESETS, evaluate, addressOf, csv, firmware, starterCompatible, LIMITS, ROW_PINS, SENSE_PINS, SWITCH_PINS } from '../site/logic.js';
 import { patternSVG } from '../site/pattern.js';
 import { materials, checklistHTML } from '../site/build.js';
 
@@ -36,7 +36,7 @@ test('one-input, four-output, zero-one extremes', () => {
   assert.equal(compile('INPUT a\nz = 0').ones, 0);
 });
 test('bad, malicious, ambiguous and oversized programs fail closed', () => {
-  for (const input of ['', 'a = 1', 'INPUT a,b,c,d\nx = a', 'INPUT a,a\nx = a', 'INPUT and\nx = 1', 'INPUT a,\nx = a', 'INPUT a\na = 1', 'INPUT a\nx = a\nx = a', 'INPUT a\nx = a\ny = x', 'INPUT a\nx = (a', 'INPUT a\nx = a)', 'INPUT a\nx = a b', 'INPUT a\nx = a && a', 'INPUT a\nx = eval(1)', 'INPUT a\nx = document.cookie', 'INPUT a\nx = 2', 'INPUT a\nx = ', 'INPUT a\nx = <script>', 'INPUT a\nx=1\ny=1\nz=1\np=1\nq=1', 'INPUT a\nx = ' + 'NOT '.repeat(257) + 'a', 'x'.repeat(2401), null]) {
+  for (const input of ['', 'a = 1', 'INPUT a,b,c,d,e,f,g,h,i,j,k,l,m\nx = a', 'INPUT a,a\nx = a', 'INPUT and\nx = 1', 'INPUT a,\nx = a', 'INPUT a\na = 1', 'INPUT a\nx = a\nx = a', 'INPUT a\nx = y\ny = a', 'INPUT a\nx = (a', 'INPUT a\nx = a)', 'INPUT a\nx = a b', 'INPUT a\nx = a && a', 'INPUT a\nx = eval(1)', 'INPUT a\nx = document.cookie', 'INPUT a\nx = 2', 'INPUT a\nx = ', 'INPUT a\nx = <script>', 'INPUT a\n' + Array.from({length:17},(_,i)=>'o'+i+'=1').join('\n'), 'INPUT a\nx = ' + 'NOT '.repeat(257) + 'a', 'x'.repeat(LIMITS.length+1), null]) {
     assert.throws(() => compile(input), Error, JSON.stringify(input));
   }
 });
@@ -56,14 +56,54 @@ test('exports and bills of materials preserve row, bit and diode counts', () => 
     const m = compile(p.code);
     assert.equal(csv(m).trim().split('\n').length, m.rows.length + 1);
     assert.equal((checklistHTML(m, 'circuit').match(/<li>/g) || []).length, m.rows.length * m.outputs.length);
-    assert.equal(materials(m, 'circuit')[1][0], m.ones);
+    assert.equal(materials(m, 'circuit')[starterCompatible(m) ? 1 : 0][0], m.ones);
     assert.equal((patternSVG(m, -1, 'circuit').match(/1 · diode/g) || []).length, m.ones);
-    assert.ok(firmware(m).includes('pinMode(rowPins[address], INPUT)'));
-    assert.ok(!firmware(m).includes(p.code));
+    if (starterCompatible(m)) {
+      assert.ok(firmware(m).includes('pinMode(rowPins[address], INPUT)'));
+      assert.ok(!firmware(m).includes(p.code));
+    } else assert.throws(() => firmware(m), /starter reader/);
   }
 });
 test('hardware pin allocation has no collisions at maximum size', () => {
   const pins = [...ROW_PINS, ...SWITCH_PINS, ...SENSE_PINS];
   assert.equal(new Set(pins).size, pins.length);
   assert.equal(pins.length, 15);
+});
+
+test('advanced arithmetic matches independent integer operations at every address', () => {
+  for (const r of compile(PRESETS.adder4.code).rows) {
+    const a=addressOf(r.bits.slice(0,4)), b=addressOf(r.bits.slice(4));
+    assert.equal(addressOf(r.values.slice(0,4))+16*r.values[4],a+b);
+  }
+  for (const r of compile(PRESETS.compare4.code).rows) {
+    const a=addressOf(r.bits.slice(0,4)),b=addressOf(r.bits.slice(4));
+    assert.deepEqual(r.values,[Number(a>b),Number(a===b),Number(a<b)]);
+  }
+  for (const r of compile(PRESETS.alu.code).rows) {
+    const op=addressOf(r.bits.slice(0,2)),a=addressOf(r.bits.slice(2,6)),b=addressOf(r.bits.slice(6));
+    const result=[a+b,a&b,a^b,a|b][op];
+    assert.equal(addressOf(r.values.slice(0,4)),result&15);
+    assert.equal(r.values[4],Number(op===0 && result>15));
+    assert.equal(r.values[5],Number((result&15)===0));
+  }
+});
+test('decoder and eight-way selector choose exactly the expected signals', () => {
+  const digits=['1111110','0110000','1101101','1111001','0110011','1011011','1011111','1110000','1111111','1111011'];
+  for (const r of compile(PRESETS.display.code).rows) assert.equal(r.values.join(''), digits[r.address] || '0000000');
+  for (const r of compile(PRESETS.mux8.code).rows) assert.equal(r.values[0],r.bits[3+addressOf(r.bits.slice(0,3))]);
+});
+test('named signals evaluate once per row and reject forward references, cycles and reserved names', () => {
+  const m=compile('INPUT a,b\nLET t=a XOR b\nx=t AND a\ny=x OR b');
+  assert.equal(m.outputs.length,2);
+  assert.deepEqual(m.rows.map(r=>r.values),[[0,0],[0,1],[1,1],[0,1]]);
+  for (const source of ['INPUT a\nLET x=x\no=x','INPUT a\nLET x=y\nLET y=x\no=x','INPUT a\nLET a=1\nx=a','INPUT a\nLET x=a','INPUT let\nx=1']) assert.throws(()=>compile(source));
+  assert.throws(()=>compile('INPUT a\n'+Array.from({length:65},(_,i)=>`LET t${i}=a`).join('\n')+'\nx=a'),/64/);
+});
+test('maximum memory and banked patterns preserve global row addresses', () => {
+  const m=compile('INPUT '+Array.from({length:12},(_,i)=>`i${i}`).join(',')+'\n'+Array.from({length:16},(_,i)=>`o${i}=i${i%12}`).join('\n'));
+  assert.equal(m.rows.length,4096);assert.equal(m.rows[4095].values.join(''),'1'.repeat(16));
+  assert.equal(m.rows.length*m.outputs.length,65536);
+  const svg=patternSVG(m,4095,'yarn',4080,16);
+  assert.match(svg,/4095 \/ 111111111111/);assert.doesNotMatch(svg,/00 \/ 000000000000/);
+  assert.equal((svg.match(/<circle /g)||[]).length,256);
 });
